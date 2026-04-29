@@ -33,6 +33,43 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 #app{height:100vh;display:flex;align-items:center;justify-content:center}
 #stage{width:100%;max-width:700px;padding:0 20px;display:flex;flex-direction:column;gap:12px}
 
+/* FIXED GRID LAYOUT FOR DRAWING MODE */
+body.drawing-active #app { align-items: stretch; display: block; }
+body.drawing-active #stage { 
+  max-width: 100%; 
+  padding: 0; 
+  height: 100vh; 
+  display: grid; 
+  grid-template-rows: auto 1fr; /* Top bar + Note Box Area */
+  gap: 0; 
+}
+body.drawing-active #top-bar { padding: 12px 20px; }
+body.drawing-active #note-box { 
+  display: grid;
+  grid-template-rows: auto 1fr; /* Timestamp (if visible) + Canvas Pane */
+  border-radius: 0; 
+  box-shadow: none; 
+  background: #fff; 
+  margin: 0; 
+  padding: 0;
+  overflow: hidden;
+}
+body.drawing-active #canvas-pane { 
+  display: grid;
+  grid-template-rows: auto 1fr; /* Toolbar + Viewport */
+  height: 100%;
+  overflow: hidden;
+}
+body.drawing-active #draw-toolbar { padding: 0 20px 12px 20px; }
+body.drawing-active #canvas-viewport { 
+  height: 100%;
+  width: 100%;
+  border-radius: 0; 
+  border-top: 1px solid var(--active); 
+  overflow: scroll !important; /* Force scroll */
+  -webkit-overflow-scrolling: touch;
+}
+
 /* top bar */
 #top-bar{display:flex;gap:8px;align-items:center}
 .top-btn{border:none;background:none;border-radius:10px;padding:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s}
@@ -170,7 +207,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 <div id="toast"></div>
 
 <script>
-/* ── SERVICE WORKER REGISTRATION ── */
+/*[cite: 1] ── SERVICE WORKER REGISTRATION ── */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js')
@@ -179,13 +216,13 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-/* ── constants ── */
-const INIT_H      = 900;
-const GROW_MARGIN = 250;
-const GROW_BY     = 600;
+/* ── constants ──[cite: 1] */
+const INIT_H      = 1500; // Large height for infinite feel
+const GROW_MARGIN = 300;
+const GROW_BY     = 800;
 const LINE_GAP    = 32;
 
-/* ── DB ── */
+/* ── DB ──[cite: 1] */
 const STORE_KEY = 'notes_merged_v2';
 let db = JSON.parse(localStorage.getItem(STORE_KEY)||'{"notes":{}}');
 let currentNoteId = null;
@@ -278,21 +315,23 @@ function openNote(id){
 }
 renderTree();
 
-/* ── mode toggle ── */
+/* ── mode toggle ──[cite: 1] */
 const textPane=document.getElementById('text-pane'),canvasPane=document.getElementById('canvas-pane');
 document.getElementById('btn-mode-text').onclick=()=>{
+  document.body.classList.remove('drawing-active');
   document.getElementById('btn-mode-text').classList.add('active'); document.getElementById('btn-mode-draw').classList.remove('active');
   textPane.style.display=''; canvasPane.classList.remove('visible');
 };
 document.getElementById('btn-mode-draw').onclick=()=>{
+  document.body.classList.add('drawing-active');
   document.getElementById('btn-mode-draw').classList.add('active'); document.getElementById('btn-mode-text').classList.remove('active');
   textPane.style.display='none'; canvasPane.classList.add('visible');
   requestAnimationFrame(()=>{
-    if(drawCanvas.width === 0 || drawCanvas.width !== getCanvasWidth()) initCanvas(canvasHeight);
+    initCanvas(canvasHeight);
   });
 };
 
-/* ── canvas setup ── */
+/* ── canvas setup ──[cite: 1] */
 const viewport   = document.getElementById('canvas-viewport');
 const scrollInner= document.getElementById('canvas-scroll-inner');
 const drawCanvas = document.getElementById('draw-canvas');
@@ -302,10 +341,10 @@ let canvasHeight = INIT_H;
 let linesEnabled = false;
 let strokes=[], redoStack=[], drawing=false, currentStroke=null;
 let tool='pen', color='#111', size=3;
-let strokesData = []; 
 
 function getCanvasWidth(){
-  return viewport.clientWidth || 660;
+  // Returns viewport width, effectively the full screen width in Draw mode
+  return viewport.clientWidth || window.innerWidth;
 }
 
 function initCanvas(h){
@@ -317,8 +356,14 @@ function initCanvas(h){
   drawCanvas.style.height = canvasHeight + 'px';
   scrollInner.style.width  = w + 'px';
   scrollInner.style.height = canvasHeight + 'px';
-  strokes = []; redoStack = [];
-  redrawAll();
+  
+  if(currentNoteId && db.notes[currentNoteId].canvasData){
+      const img = new Image();
+      img.onload = () => { dctx.clearRect(0,0,w,h); dctx.drawImage(img,0,0); redrawAll(); };
+      img.src = db.notes[currentNoteId].canvasData;
+  } else {
+    redrawAll();
+  }
 }
 
 function drawLinesOnto(ctx, w, h){
@@ -393,9 +438,11 @@ drawCanvas.addEventListener('pointermove', e=>{
   const pts = currentStroke.points;
   if(pts.length >= 2) drawSeg(currentStroke, pts.length-2);
   maybeExpand(y);
+  
+  // FIXED AUTO-SCROLLING
   const vr = viewport.getBoundingClientRect();
-  if(e.clientY > vr.bottom - 50) viewport.scrollTop += 8;
-  if(e.clientY < vr.top + 50)    viewport.scrollTop -= 8;
+  if(e.clientY > vr.bottom - 60) viewport.scrollTop += 15;
+  if(e.clientY < vr.top + 60)    viewport.scrollTop -= 15;
 });
 
 drawCanvas.addEventListener('pointerup', ()=>{ drawing=false; saveCanvasToNote(); });
@@ -447,7 +494,7 @@ document.getElementById('linesBtn').onclick=()=>{
   redrawAll();
 };
 
-/* ── PDF export ── */
+/* ── PDF export ──[cite: 1] */
 document.getElementById('exportPdfBtn').onclick=exportPDF;
 
 function getTrimHeight(){
